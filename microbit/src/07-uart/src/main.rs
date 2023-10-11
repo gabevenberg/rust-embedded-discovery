@@ -1,9 +1,12 @@
 #![no_main]
 #![no_std]
 
+use core::fmt::Write;
 use cortex_m_rt::entry;
-use rtt_target::rtt_init_print;
+use heapless::Vec;
+use nb::block;
 use panic_rtt_target as _;
+use rtt_target::rtt_init_print;
 
 #[cfg(feature = "v1")]
 use microbit::{
@@ -50,8 +53,32 @@ fn main() -> ! {
         UartePort::new(serial)
     };
 
-    nb::block!(serial.write(b'X')).unwrap();
-    nb::block!(serial.flush()).unwrap();
+    // A buffer with 32 bytes of capacity
+    let mut buffer: Vec<u8, 32> = Vec::new();
 
-    loop {}
+    loop {
+        buffer.clear();
+
+        loop {
+            let char = block!(serial.read()).unwrap();
+            if char == 13 {
+                break;
+            }
+            block!(serial.write(char)).unwrap();
+            if buffer.push(char).is_err() {
+                write!(serial, "input buffer is full").unwrap();
+                break;
+            }
+            block!(serial.flush()).unwrap();
+        }
+
+        for byte in [b'\n', b'\r']
+            .iter()
+            .chain(buffer.iter().rev().chain(&[b'\n', b'\r']))
+        {
+            block!(serial.write(*byte)).unwrap();
+        }
+        block!(serial.flush()).unwrap();
+    }
 }
+
