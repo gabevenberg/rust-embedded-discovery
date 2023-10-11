@@ -25,3 +25,4 @@ embedded-hal = "0.2.6"
 [features]
 v2 = ["microbit-v2"]
 v1 = ["microbit"]
+default = ["v2"]
