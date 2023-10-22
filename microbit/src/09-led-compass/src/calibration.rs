@@ -1,3 +1,4 @@
+#![allow(unused)]
 //! Translated from <https://github.com/lancaster-university/codal-microbit-v2/blob/006abf5566774fbcf674c0c7df27e8a9d20013de/source/MicroBitCompassCalibrator.cpp>
 
 use core::fmt::Debug;
@@ -33,16 +34,16 @@ impl Default for Calibration {
             // },
             // radius: 0,
             center: Measurement {
-                x: 5502,
-                y: 7612,
-                z: -40358,
+                x: 2434,
+                y: 5528,
+                z: -40156,
             },
             scale: Measurement {
-                x: 1098,
-                y: 1095,
-                z: 1151,
+                x: 1044,
+                y: 1042,
+                z: 1049,
             },
-            radius: 51484,
+            radius: 61751,
         }
     }
 }
@@ -250,7 +251,8 @@ pub fn calibrated_measurement(measurement: Measurement, calibration: &Calibratio
         y: ((out.y - calibration.center.y) * calibration.scale.y) >> 10,
         z: ((out.z - calibration.center.z) * calibration.scale.z) >> 10,
     };
-    enu_to_cartesian(out)
+    //to convert it back to the board-native SWU cordinates
+    measurement_to_enu(out)
 }
 
 fn measurement_to_enu(measurement: Measurement) -> Measurement {

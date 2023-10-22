@@ -5,12 +5,12 @@
 use core::f32::consts::PI;
 
 use cortex_m_rt::entry;
-use libm::atan2f;
 use panic_rtt_target as _;
 use rtt_target::{rprintln, rtt_init_print};
 
 mod calibration;
 mod led;
+mod tilt_compensation;
 
 use microbit::{display::blocking::Display, hal::Timer};
 
@@ -22,10 +22,11 @@ use microbit::{hal::twim, pac::twim0::frequency::FREQUENCY_A};
 
 use lsm303agr::{AccelOutputDataRate, Lsm303agr, MagOutputDataRate};
 
-use crate::{
-    calibration::calc_calibration,
-    led::{direction_to_led, Direction},
-};
+#[cfg(feature = "calibration")]
+use crate::calibration::calc_calibration;
+
+use crate::led::{direction_to_led, theta_to_direction};
+use crate::tilt_compensation::{calc_attitude, calc_tilt_calibrated_measurement, swd_to_ned};
 
 const DELAY: u32 = 100;
 
@@ -49,37 +50,42 @@ fn main() -> ! {
     sensor.set_accel_odr(AccelOutputDataRate::Hz10).unwrap();
     let mut sensor = sensor.into_mag_continuous().ok().unwrap();
 
-    // let calibration = calc_calibration(&mut sensor, &mut display, &mut timer);
+    //TODO: re-callibrate with button.
+    #[cfg(feature = "calibration")]
+    let calibration = calc_calibration(&mut sensor, &mut display, &mut timer);
+    #[cfg(not(feature = "calibration"))]
     let calibration = calibration::Calibration::default();
     rprintln!("Calibration: {:?}", calibration);
+
     loop {
-        while !sensor.mag_status().unwrap().xyz_new_data {}
-        let mut mag_data = sensor.mag_data().unwrap();
-        mag_data = calibration::calibrated_measurement(mag_data, &calibration);
-        // rprintln!("x: {}, y: {}, z: {}", data.x, data.y, data.z);
+        while !(sensor.mag_status().unwrap().xyz_new_data
+            && sensor.accel_status().unwrap().xyz_new_data)
+        {}
+        let mag_data = sensor.mag_data().unwrap();
+        let mag_data = calibration::calibrated_measurement(mag_data, &calibration);
+        let acel_data = sensor.accel_data().unwrap();
 
-        let theta = atan2f(mag_data.y as f32, mag_data.x as f32);
+        let ned_mag_data = swd_to_ned(mag_data);
+        let ned_acel_data = swd_to_ned(acel_data);
 
-        let dir = if theta < (-7. * PI / 8.) {
-            Direction::West
-        } else if theta < (-5. * PI / 8.) {
-            Direction::SouthWest
-        } else if theta < (-3. * PI / 8.) {
-            Direction::South
-        } else if theta < (-PI / 8.) {
-            Direction::SouthEast
-        } else if theta < (PI / 8.) {
-            Direction::East
-        } else if theta < (3. * PI / 8.) {
-            Direction::NorthEast
-        } else if theta < (5. * PI / 8.) {
-            Direction::North
-        } else if theta < (7. * PI / 8.) {
-            Direction::NorthWest
-        } else {
-            Direction::West
-        };
+        let attitude = calc_attitude(&ned_acel_data);
 
-        display.show(&mut timer, direction_to_led(dir), DELAY)
+        //theta=0 at north, pi/-pi at south, pi/2 at east, and -pi/2 at west
+        let heading = calc_tilt_calibrated_measurement(ned_mag_data, &attitude);
+
+        #[cfg(not(feature = "calibration"))]
+        rprintln!(
+            "pitch: {:<+5.0}, roll: {:<+5.0}, heading: {:<+5.0}",
+            attitude.pitch * (180.0 / PI),
+            attitude.roll * (180.0 / PI),
+            heading.0 * (180.0 / PI),
+        );
+        rprintln!("x: {:<+16}, y: {:<+16}, z: {:<+16}", ned_acel_data.x, ned_acel_data.y, ned_acel_data.z);
+
+        display.show(
+            &mut timer,
+            direction_to_led(theta_to_direction(heading)),
+            DELAY,
+        )
     }
 }
